@@ -88,6 +88,7 @@ class VoiceTriggerConfig:
     enabled: bool
     wake_word: str
     listen_seconds: float
+    followup_listen_seconds: float
     sample_rate: int
     transcription_model: str
 
@@ -98,6 +99,10 @@ class VoiceTriggerConfig:
             enabled=_get_env_bool("ASSISTANT_ENABLE_VOICE_TRIGGER", False),
             wake_word=_get_env("ASSISTANT_WAKE_WORD", "Lune") or "Lune",
             listen_seconds=_get_env_float("ASSISTANT_VOICE_LISTEN_SECONDS", 3.0),
+            followup_listen_seconds=_get_env_float(
+                "ASSISTANT_VOICE_FOLLOWUP_LISTEN_SECONDS",
+                4.0,
+            ),
             sample_rate=_get_env_int("ASSISTANT_VOICE_SAMPLE_RATE", 16000),
             transcription_model=_get_env(
                 "ASSISTANT_VOICE_TRANSCRIPTION_MODEL",

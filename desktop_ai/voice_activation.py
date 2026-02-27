@@ -60,22 +60,42 @@ class OpenAIWakeWordListener:
         if not transcript:
             return None
 
-        wake_word_match = self._wake_word_pattern.search(transcript)
-        if wake_word_match is None:
+        if self._wake_word_pattern.search(transcript) is None:
             return None
 
-        trailing_text: str = transcript[wake_word_match.end() :]
-        user_note: str | None = trailing_text.lstrip(" ,:;.!?-").strip() or None
+        self.logger.debug("Wake-word transcript: %s", transcript)
+        user_note: str | None = self._extract_user_note_after_wake_word(transcript)
+        if user_note is None:
+            # If wake word was detected but no trailing text was captured, record a short
+            # follow-up clip so the spoken request after the wake word is not lost.
+            try:
+                followup_pcm: bytes = self._record_clip(
+                    duration_seconds=self.voice_config.followup_listen_seconds
+                )
+                followup_transcript: str = self._transcribe(followup_pcm)
+            except Exception as error:
+                self.logger.warning("Voice activation follow-up listen failed: %s", error)
+                followup_transcript = ""
+
+            followup_note: str | None = self._clean_user_note(followup_transcript)
+            if followup_note:
+                transcript = f"{transcript} {followup_transcript}".strip()
+                user_note = followup_note
+
+        self.logger.debug("Wake-word user note: %s", user_note)
         return VoiceActivation(
             transcript=transcript,
             wake_word=self.voice_config.wake_word,
             user_note=user_note,
         )
 
-    def _record_clip(self) -> bytes:
+    def _record_clip(self, *, duration_seconds: float | None = None) -> bytes:
         """Capture raw mono PCM16 audio from the default microphone."""
         chunks: list[bytes] = []
-        duration_ms: int = max(1, int(self.voice_config.listen_seconds * 1000))
+        seconds: float = (
+            duration_seconds if duration_seconds is not None else self.voice_config.listen_seconds
+        )
+        duration_ms: int = max(1, int(seconds * 1000))
 
         def callback(indata: Any, frames: int, time_info: Any, status: Any) -> None:
             _ = frames, time_info
@@ -92,6 +112,19 @@ class OpenAIWakeWordListener:
             self._sounddevice.sleep(duration_ms)
 
         return b"".join(chunks)
+
+    def _extract_user_note_after_wake_word(self, transcript: str) -> str | None:
+        """Return trailing user request after the last wake-word occurrence."""
+        matches: list[re.Match[str]] = list(self._wake_word_pattern.finditer(transcript))
+        if not matches:
+            return None
+        trailing_text: str = transcript[matches[-1].end() :]
+        return self._clean_user_note(trailing_text)
+
+    def _clean_user_note(self, text: str) -> str | None:
+        """Normalize a transcribed user request snippet."""
+        cleaned: str = text.lstrip(" ,:;.!?-").strip()
+        return cleaned or None
 
     def _transcribe(self, pcm_audio: bytes) -> str:
         """Transcribe WAV audio through OpenAI and return plain text."""

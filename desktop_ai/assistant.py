@@ -73,6 +73,9 @@ class DesktopAssistant:
                     continue
                 self.logger.info('Wake word "%s" detected.', activation.wake_word)
                 turn_note = activation.user_note or user_note
+                if turn_note is None:
+                    self.logger.info("No follow-up request captured after wake word; waiting.")
+                    continue
 
             result: AssistantTurnResult = self.run_once(user_note=turn_note)
             self.logger.info("Assistant: %s", result.response_text)
