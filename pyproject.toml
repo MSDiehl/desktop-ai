@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "desktop-ai-assistant"
+version = "0.1.0"
+description = "Context-aware desktop AI assistant with OpenAI + ElevenLabs"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "mss>=10.0.0",
+  "openai>=1.58.1",
+  "psutil>=6.1.0",
+  "python-dotenv>=1.0.1",
+  "requests>=2.32.3",
+]
+
+[project.scripts]
+desktop-ai = "desktop_ai.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["desktop_ai*"]

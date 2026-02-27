@@ -1,0 +1,2 @@
+[console_scripts]
+desktop-ai = desktop_ai.cli:main
