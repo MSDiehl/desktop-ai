@@ -7,9 +7,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 DEFAULT_SYSTEM_PROMPT = (
-    "You are a context-aware desktop AI assistant. Use the screenshot and context "
-    "to understand what the user is doing right now. Reply in short, practical "
-    "sentences with clear next-step suggestions."
+    "You are Sophie, a friendly desktop AI buddy. Be conversational and natural. "
+    "When the user asks a direct question, answer it directly without unsolicited "
+    "productivity advice. When they ask for help, give concise and actionable guidance."
 )
 
 
@@ -76,8 +76,34 @@ class OpenAIConfig:
             api_key=_require_env("OPENAI_API_KEY"),
             model=_get_env("OPENAI_MODEL", "gpt-4.1-mini") or "gpt-4.1-mini",
             temperature=_get_env_float("OPENAI_TEMPERATURE", 0.5),
-            max_output_tokens=_get_env_int("OPENAI_MAX_OUTPUT_TOKENS", 220),
+            max_output_tokens=_get_env_int("OPENAI_MAX_OUTPUT_TOKENS", 120),
             timeout_seconds=_get_env_float("OPENAI_TIMEOUT_SECONDS", 45.0),
+        )
+
+
+@dataclass(slots=True, frozen=True)
+class VoiceTriggerConfig:
+    """Wake-word voice activation settings."""
+
+    enabled: bool
+    wake_word: str
+    listen_seconds: float
+    sample_rate: int
+    transcription_model: str
+
+    @classmethod
+    def from_env(cls) -> "VoiceTriggerConfig":
+        """Load wake-word voice activation settings from environment variables."""
+        return cls(
+            enabled=_get_env_bool("ASSISTANT_ENABLE_VOICE_TRIGGER", False),
+            wake_word=_get_env("ASSISTANT_WAKE_WORD", "Lune") or "Lune",
+            listen_seconds=_get_env_float("ASSISTANT_VOICE_LISTEN_SECONDS", 3.0),
+            sample_rate=_get_env_int("ASSISTANT_VOICE_SAMPLE_RATE", 16000),
+            transcription_model=_get_env(
+                "ASSISTANT_VOICE_TRANSCRIPTION_MODEL",
+                "gpt-4o-mini-transcribe",
+            )
+            or "gpt-4o-mini-transcribe",
         )
 
 
@@ -119,6 +145,7 @@ class AssistantConfig:
     artifacts_dir: Path
     monitor_index: int
     enable_speech: bool
+    voice_trigger: VoiceTriggerConfig
     system_prompt: str
     log_level: str
 
@@ -136,6 +163,7 @@ class AssistantConfig:
             artifacts_dir=Path(_get_env("ASSISTANT_ARTIFACTS_DIR", "./artifacts") or "./artifacts"),
             monitor_index=_get_env_int("ASSISTANT_MONITOR_INDEX", 1),
             enable_speech=_get_env_bool("ASSISTANT_ENABLE_SPEECH", True),
+            voice_trigger=VoiceTriggerConfig.from_env(),
             system_prompt=_get_env("ASSISTANT_SYSTEM_PROMPT", DEFAULT_SYSTEM_PROMPT)
             or DEFAULT_SYSTEM_PROMPT,
             log_level=_get_env("ASSISTANT_LOG_LEVEL", "INFO") or "INFO",

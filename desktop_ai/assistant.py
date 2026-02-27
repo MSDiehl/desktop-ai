@@ -6,8 +6,16 @@ import logging
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 
-from desktop_ai.interfaces import AudioOutput, ContextCollector, ScreenCapturer, SpeechSynthesizer, TextGenerator
+from desktop_ai.interfaces import (
+    AudioOutput,
+    ContextCollector,
+    ScreenCapturer,
+    SpeechSynthesizer,
+    TextGenerator,
+    VoiceTriggerListener,
+)
 from desktop_ai.prompting import build_user_prompt
 from desktop_ai.types import AssistantTurnResult
 
@@ -21,6 +29,7 @@ class DesktopAssistant:
     text_generator: TextGenerator
     speech_synthesizer: SpeechSynthesizer | None = None
     audio_output: AudioOutput | None = None
+    voice_trigger_listener: VoiceTriggerListener | None = None
     enable_speech: bool = True
     logger: logging.Logger = logging.getLogger(__name__)
 
@@ -32,7 +41,7 @@ class DesktopAssistant:
         screen = self.screen_capturer.capture()
         response_text: str = self.text_generator.generate(prompt=prompt, screen=screen)
 
-        audio_path = None
+        audio_path: Path | None = None
         if self.enable_speech and self.speech_synthesizer is not None and self.audio_output is not None:
             wav_bytes: bytes = self.speech_synthesizer.synthesize(response_text)
             audio_path = self.audio_output.output(wav_bytes)
@@ -57,7 +66,15 @@ class DesktopAssistant:
         """Run assistant repeatedly at a fixed interval until stopped."""
         completed_turns: int = 0
         while True:
-            result: AssistantTurnResult = self.run_once(user_note=user_note)
+            turn_note: str | None = user_note
+            if self.voice_trigger_listener is not None:
+                activation = self.voice_trigger_listener.listen_for_activation()
+                if activation is None:
+                    continue
+                self.logger.info('Wake word "%s" detected.', activation.wake_word)
+                turn_note = activation.user_note or user_note
+
+            result: AssistantTurnResult = self.run_once(user_note=turn_note)
             self.logger.info("Assistant: %s", result.response_text)
             if result.audio_path:
                 self.logger.info("Audio saved to %s", result.audio_path)

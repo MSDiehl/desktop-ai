@@ -13,6 +13,7 @@ desktop_ai/openai_client.py
 desktop_ai/prompting.py
 desktop_ai/screen.py
 desktop_ai/types.py
+desktop_ai/voice_activation.py
 desktop_ai_assistant.egg-info/PKG-INFO
 desktop_ai_assistant.egg-info/SOURCES.txt
 desktop_ai_assistant.egg-info/dependency_links.txt

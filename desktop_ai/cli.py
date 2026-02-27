@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+from dataclasses import replace
 from collections.abc import Sequence
 
 from dotenv import load_dotenv
@@ -15,6 +16,7 @@ from desktop_ai.context import CompositeContextCollector, build_default_context_
 from desktop_ai.elevenlabs_client import ElevenLabsSpeechSynthesizer
 from desktop_ai.openai_client import OpenAITextGenerator
 from desktop_ai.screen import MSSScreenCapturer
+from desktop_ai.voice_activation import OpenAIWakeWordListener
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -33,6 +35,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--monitor-index", type=int, default=None, help="mss monitor index (default from env).")
     parser.add_argument("--no-speech", action="store_true", help="Disable ElevenLabs synthesis and playback.")
     parser.add_argument("--no-autoplay", action="store_true", help="Store audio file but do not play it.")
+    voice_group = parser.add_mutually_exclusive_group()
+    voice_group.add_argument("--voice-trigger", action="store_true", help="Enable wake-word voice activation.")
+    voice_group.add_argument("--no-voice-trigger", action="store_true", help="Disable wake-word voice activation.")
+    parser.add_argument("--wake-word", type=str, default=None, help="Override wake word (default from env).")
     return parser
 
 
@@ -68,6 +74,23 @@ def build_assistant(args: argparse.Namespace) -> tuple[DesktopAssistant, Assista
 
     text_generator = OpenAITextGenerator(config=config.openai, system_prompt=config.system_prompt)
 
+    voice_config = config.voice_trigger
+    if args.voice_trigger:
+        voice_config = replace(voice_config, enabled=True)
+    if args.no_voice_trigger:
+        voice_config = replace(voice_config, enabled=False)
+    if args.wake_word is not None:
+        wake_word: str = args.wake_word.strip()
+        voice_config = replace(voice_config, wake_word=wake_word or voice_config.wake_word)
+
+    voice_trigger_listener = None
+    if voice_config.enabled:
+        voice_trigger_listener = OpenAIWakeWordListener(
+            openai_config=config.openai,
+            voice_config=voice_config,
+            logger=logging.getLogger("desktop_ai.voice_activation"),
+        )
+
     speech_enabled: bool = config.enable_speech and not args.no_speech
     speech_synthesizer = None
     audio_output = None
@@ -85,6 +108,7 @@ def build_assistant(args: argparse.Namespace) -> tuple[DesktopAssistant, Assista
         text_generator=text_generator,
         speech_synthesizer=speech_synthesizer,
         audio_output=audio_output,
+        voice_trigger_listener=voice_trigger_listener,
         enable_speech=speech_enabled,
         logger=logging.getLogger("desktop_ai.assistant"),
     )

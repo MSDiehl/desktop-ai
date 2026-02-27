@@ -9,6 +9,7 @@ Requires-Dist: openai>=1.58.1
 Requires-Dist: psutil>=6.1.0
 Requires-Dist: python-dotenv>=1.0.1
 Requires-Dist: requests>=2.32.3
+Requires-Dist: sounddevice>=0.4.7
 
 # desktop-ai
 
@@ -20,6 +21,7 @@ It captures:
 
 It then:
 - Uses OpenAI for multimodal reasoning (text + screenshot).
+- Uses OpenAI transcription for wake-word voice activation.
 - Uses ElevenLabs for TTS.
 - Saves audio output and optionally plays it locally.
 
@@ -29,6 +31,7 @@ It then:
 - Docstrings on all functions and methods.
 - Dynamic context-provider registry for easy expansion.
 - CLI-first workflow for one-shot or continuous assistant loops.
+- Optional wake-word trigger (for example: `Lune, what do you think of this?`).
 
 ## Project layout
 
@@ -38,6 +41,7 @@ It then:
 - `context.py`: pluggable context providers.
 - `screen.py`: screenshot capture (mss).
 - `openai_client.py`: OpenAI Responses API integration.
+- `voice_activation.py`: microphone capture + wake-word transcription.
 - `elevenlabs_client.py`: ElevenLabs TTS integration.
 - `audio.py`: local WAV storage/playback.
 - `cli.py`: command-line entrypoint.
@@ -56,6 +60,10 @@ pip install -e .
 - `ELEVENLABS_API_KEY`
 - `ELEVENLABS_VOICE_ID`
 
+Optional for wake-word mode:
+- `ASSISTANT_ENABLE_VOICE_TRIGGER=true`
+- `ASSISTANT_WAKE_WORD=Lune`
+
 ## Usage
 
 Single run:
@@ -70,12 +78,19 @@ Continuous loop:
 python -m desktop_ai
 ```
 
+Continuous loop with wake-word activation:
+
+```bash
+python -m desktop_ai --voice-trigger --wake-word Lune
+```
+
 Useful options:
 
 ```bash
 python -m desktop_ai --interval 6 --note "Focus on gaming commentary"
 python -m desktop_ai --once --no-speech
 python -m desktop_ai --context-providers timestamp,active_window --once
+python -m desktop_ai --no-voice-trigger
 ```
 
 ## Dynamic extension points
@@ -92,5 +107,6 @@ To swap AI/TTS providers:
 ## Notes
 
 - Artifacts are written to `./artifacts/audio` by default.
+- Response length can be reduced with `OPENAI_MAX_OUTPUT_TOKENS` in `.env`.
 - On Unix, playback uses `afplay`, `aplay`, or `paplay` if installed.
 - On Windows, playback uses `winsound` with WAV output.

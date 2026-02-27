@@ -38,3 +38,12 @@ class AssistantTurnResult:
     audio_path: Path | None
     started_at: datetime
     finished_at: datetime
+
+
+@dataclass(slots=True, frozen=True)
+class VoiceActivation:
+    """Represents one wake-word activation event."""
+
+    transcript: str
+    wake_word: str
+    user_note: str | None

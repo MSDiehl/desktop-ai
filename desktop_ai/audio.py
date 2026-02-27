@@ -19,15 +19,19 @@ class LocalAudioOutput:
 
     output_dir: Path
     autoplay: bool = True
+    cleanup_after_playback: bool = True
 
-    def output(self, wav_bytes: bytes) -> Path:
-        """Persist audio and optionally play it through a local player."""
+    def output(self, wav_bytes: bytes) -> Path | None:
+        """Persist audio, optionally play it, and optionally clean it up."""
         self.output_dir.mkdir(parents=True, exist_ok=True)
         target_path: Path = self._build_output_path()
         target_path.write_bytes(wav_bytes)
 
         if self.autoplay:
             self._safe_play(target_path)
+            if self.cleanup_after_playback:
+                self._safe_delete(target_path)
+                return None
         return target_path
 
     def _build_output_path(self) -> Path:
@@ -41,6 +45,13 @@ class LocalAudioOutput:
             self._play(path)
         except Exception as error:
             LOGGER.warning("Audio playback failed for %s: %s", path, error)
+
+    def _safe_delete(self, path: Path) -> None:
+        """Delete generated WAV file while swallowing cleanup errors."""
+        try:
+            path.unlink(missing_ok=True)
+        except Exception as error:
+            LOGGER.warning("Audio cleanup failed for %s: %s", path, error)
 
     def _play(self, path: Path) -> None:
         """Play WAV file with platform-specific methods."""
