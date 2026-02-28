@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from typing import cast
 
 from desktop_ai.types import CapturedScreen
 
@@ -30,7 +31,7 @@ class MSSScreenCapturer:
                 monitor = session.monitors[self.monitor_index]
 
             screenshot = session.grab(monitor)
-            png_bytes: bytes = mss.tools.to_png(screenshot.rgb, screenshot.size)
+            png_bytes = cast(bytes, mss.tools.to_png(screenshot.rgb, screenshot.size))
             width, height = screenshot.size
             return CapturedScreen(
                 png_bytes=png_bytes,

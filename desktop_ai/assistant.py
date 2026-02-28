@@ -38,11 +38,17 @@ class DesktopAssistant:
         started_at: datetime = datetime.now(timezone.utc)
         context: dict[str, str] = self.context_collector.collect()
         prompt: str = build_user_prompt(context, user_note=user_note)
-        screen = self.screen_capturer.capture()
-        response_text: str = self.text_generator.generate(prompt=prompt, screen=screen)
+        response_text: str = self.text_generator.generate(
+            prompt=prompt,
+            screen=self.screen_capturer.capture(),
+        )
 
         audio_path: Path | None = None
-        if self.enable_speech and self.speech_synthesizer is not None and self.audio_output is not None:
+        if (
+            self.enable_speech
+            and self.speech_synthesizer is not None
+            and self.audio_output is not None
+        ):
             wav_bytes: bytes = self.speech_synthesizer.synthesize(response_text)
             audio_path = self.audio_output.output(wav_bytes)
 
@@ -74,7 +80,9 @@ class DesktopAssistant:
                 self.logger.info('Wake word "%s" detected.', activation.wake_word)
                 turn_note = activation.user_note or user_note
                 if turn_note is None:
-                    self.logger.info("No follow-up request captured after wake word; waiting.")
+                    self.logger.info(
+                        "No follow-up request captured after wake word; waiting."
+                    )
                     continue
 
             result: AssistantTurnResult = self.run_once(user_note=turn_note)
