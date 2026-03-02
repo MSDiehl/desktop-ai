@@ -112,6 +112,27 @@ class OpenAIWakeWordListener:
             user_note=user_note,
         )
 
+    def listen_for_followup_note(self) -> str | None:
+        """Capture one immediate follow-up utterance without wake-word gating."""
+        try:
+            followup_pcm: bytes = self._record_clip(
+                duration_seconds=self.voice_config.followup_listen_seconds,
+                stop_on_silence=True,
+            )
+            transcript: str = self._transcribe(followup_pcm)
+        except Exception as error:
+            self.logger.warning("Immediate follow-up listen failed: %s", error)
+            return None
+
+        if not transcript:
+            return None
+
+        note: str | None = self._extract_user_note_after_wake_word(transcript)
+        if note is None:
+            note = self._clean_user_note(transcript)
+        self.logger.debug("Immediate follow-up note: %s", note)
+        return note
+
     def _record_clip(
         self,
         *,

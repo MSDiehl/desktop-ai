@@ -55,6 +55,9 @@ class VoiceTriggerListener(Protocol):
     ) -> VoiceActivation | None:
         """Return activation details when wake-word is heard, else None."""
 
+    def listen_for_followup_note(self) -> str | None:
+        """Listen for an immediate follow-up utterance without wake-word requirement."""
+
 
 class PresenceOverlay(Protocol):
     """Receives assistant presence state updates for UI rendering."""

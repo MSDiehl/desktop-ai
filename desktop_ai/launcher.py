@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import argparse
+import ctypes
 import os
 import queue
 import sys
 import threading
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -426,6 +428,7 @@ class SettingsLauncher:
 
     def _show_action_approval_dialog(self, plan: DesktopActionPlan) -> bool:
         """Show a Yes/No dialog describing the requested desktop actions."""
+        previous_foreground_hwnd: int | None = self._capture_foreground_window_handle()
         rendered_actions: list[str] = [
             f"{index}. {format_action(action)}"
             for index, action in enumerate(plan.actions, start=1)
@@ -444,7 +447,7 @@ class SettingsLauncher:
         except tk.TclError:
             return False
 
-        return bool(
+        approved: bool = bool(
             messagebox.askyesno(
                 title="Approve Desktop Actions",
                 message=prompt,
@@ -452,6 +455,37 @@ class SettingsLauncher:
                 icon="warning",
             )
         )
+        self._restore_foreground_window_handle(previous_foreground_hwnd)
+        if self._running and not self._closing:
+            try:
+                self.root.iconify()
+            except tk.TclError:
+                pass
+        return approved
+
+    def _capture_foreground_window_handle(self) -> int | None:
+        """Capture the current foreground window handle on Windows."""
+        if sys.platform != "win32":
+            return None
+        try:
+            hwnd: int = int(ctypes.windll.user32.GetForegroundWindow())
+        except Exception:
+            return None
+        return hwnd if hwnd > 0 else None
+
+    def _restore_foreground_window_handle(self, hwnd: int | None) -> None:
+        """Best-effort restore of a previously active window on Windows."""
+        if sys.platform != "win32" or hwnd is None:
+            return
+        user32 = ctypes.windll.user32
+        try:
+            # SW_RESTORE ensures minimized windows can become interactive again.
+            user32.ShowWindow(hwnd, 9)
+            user32.SetForegroundWindow(hwnd)
+            user32.BringWindowToTop(hwnd)
+            time.sleep(0.12)
+        except Exception:
+            return
 
     def _set_running_state(self, running: bool) -> None:
         """Toggle button states for active run lifecycle."""

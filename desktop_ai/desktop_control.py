@@ -58,14 +58,19 @@ def parse_action_plan(raw_response: str, *, max_actions_per_turn: int) -> Deskto
 
     parsed_actions: list[DesktopAction] = []
     actions_value: Any = payload.get("actions")
-    if isinstance(actions_value, list):
-        for item in actions_value:
-            action: DesktopAction | None = _parse_action(item)
-            if action is None:
-                continue
-            parsed_actions.append(action)
-            if len(parsed_actions) >= max(1, max_actions_per_turn):
-                break
+    if isinstance(actions_value, dict):
+        actions_iterable: tuple[Any, ...] = (actions_value,)
+    elif isinstance(actions_value, list):
+        actions_iterable = tuple(actions_value)
+    else:
+        actions_iterable = ()
+    for item in actions_iterable:
+        action: DesktopAction | None = _parse_action(item)
+        if action is None:
+            continue
+        parsed_actions.append(action)
+        if len(parsed_actions) >= max(1, max_actions_per_turn):
+            break
 
     return DesktopActionPlan(
         spoken_reply=spoken_reply,
@@ -328,11 +333,15 @@ def _parse_action(value: Any) -> DesktopAction | None:
     action_type: str = str(type_value).strip().lower()
     if action_type not in SUPPORTED_ACTION_TYPES:
         return None
-    args: dict[str, Any] = {
-        str(name): raw_value
-        for name, raw_value in value.items()
-        if str(name) not in {"type", "action"}
-    }
+    args: dict[str, Any] = {}
+    nested_args: Any = value.get("args")
+    if isinstance(nested_args, dict):
+        args.update({str(name): raw_value for name, raw_value in nested_args.items()})
+    for name, raw_value in value.items():
+        key: str = str(name)
+        if key in {"type", "action", "args"}:
+            continue
+        args[key] = raw_value
     return DesktopAction(type=action_type, args=args)
 
 

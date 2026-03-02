@@ -33,11 +33,14 @@ class OpenAITextGenerator:
     def generate(self, *, prompt: str, screen: CapturedScreen) -> str:
         """Generate text from prompt + screenshot."""
         image_data_url: str = self._build_data_url(screen)
-        response: Any = self._client.responses.create(
-            model=self.config.model,
-            temperature=self.config.temperature,
-            max_output_tokens=self.config.max_output_tokens,
-            input=[
+        is_desktop_action_turn: bool = (
+            "Desktop control mode is enabled." in prompt
+            or prompt.startswith("Repair the draft assistant output into a valid desktop action plan.")
+        )
+        request_kwargs: dict[str, Any] = {
+            "model": self.config.model,
+            "temperature": self.config.temperature,
+            "input": [
                 {
                     "role": "system",
                     "content": [{"type": "input_text", "text": self.system_prompt}],
@@ -50,7 +53,10 @@ class OpenAITextGenerator:
                     ],
                 },
             ],
-        )
+        }
+        if not is_desktop_action_turn:
+            request_kwargs["max_output_tokens"] = self.config.max_output_tokens
+        response: Any = self._client.responses.create(**request_kwargs)
         return self._extract_text(response)
 
     def _build_data_url(self, screen: CapturedScreen) -> str:
