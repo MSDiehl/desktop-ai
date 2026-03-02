@@ -6,6 +6,8 @@ import io
 import logging
 import re
 import wave
+from array import array
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -48,10 +50,17 @@ class OpenAIWakeWordListener:
             flags=re.IGNORECASE,
         )
 
-    def listen_for_activation(self) -> VoiceActivation | None:
+    def listen_for_activation(
+        self,
+        *,
+        on_wake_word_detected: Callable[[], None] | None = None,
+    ) -> VoiceActivation | None:
         """Listen to microphone and return activation when wake-word is heard."""
         try:
-            pcm_audio: bytes = self._record_clip()
+            # Keep wake-word detection responsive while still long enough to capture
+            # wake word + the beginning of the user request in one pass.
+            detection_seconds: float = max(0.8, min(self.voice_config.listen_seconds, 2.0))
+            pcm_audio: bytes = self._record_clip(duration_seconds=detection_seconds)
             transcript: str = self._transcribe(pcm_audio)
         except Exception as error:
             self.logger.warning("Voice activation listen failed: %s", error)
@@ -63,14 +72,21 @@ class OpenAIWakeWordListener:
         if self._wake_word_pattern.search(transcript) is None:
             return None
 
+        if on_wake_word_detected is not None:
+            try:
+                on_wake_word_detected()
+            except Exception as error:
+                self.logger.debug("Wake-word callback failed: %s", error)
+
         self.logger.debug("Wake-word transcript: %s", transcript)
         user_note: str | None = self._extract_user_note_after_wake_word(transcript)
         if user_note is None:
             # If wake word was detected but no trailing text was captured, record a short
-            # follow-up clip so the spoken request after the wake word is not lost.
+            # follow-up clip and stop on silence so speech does not get cut off early.
             try:
                 followup_pcm: bytes = self._record_clip(
-                    duration_seconds=self.voice_config.followup_listen_seconds
+                    duration_seconds=self.voice_config.followup_listen_seconds,
+                    stop_on_silence=True,
                 )
                 followup_transcript: str = self._transcribe(followup_pcm)
             except Exception as error:
@@ -89,29 +105,101 @@ class OpenAIWakeWordListener:
             user_note=user_note,
         )
 
-    def _record_clip(self, *, duration_seconds: float | None = None) -> bytes:
+    def _record_clip(
+        self,
+        *,
+        duration_seconds: float | None = None,
+        stop_on_silence: bool = False,
+    ) -> bytes:
         """Capture raw mono PCM16 audio from the default microphone."""
-        chunks: list[bytes] = []
         seconds: float = (
             duration_seconds if duration_seconds is not None else self.voice_config.listen_seconds
         )
-        duration_ms: int = max(1, int(seconds * 1000))
+        if stop_on_silence:
+            return self._record_until_silence(max_duration_seconds=seconds)
+        return self._record_fixed_duration(duration_seconds=seconds)
 
-        def callback(indata: Any, frames: int, time_info: Any, status: Any) -> None:
-            _ = frames, time_info
-            if status:
-                self.logger.debug("Microphone status: %s", status)
-            chunks.append(bytes(indata))
+    def _record_fixed_duration(self, *, duration_seconds: float) -> bytes:
+        """Capture PCM16 audio for a fixed duration."""
+        sample_rate: int = self.voice_config.sample_rate
+        block_frames: int = max(1, int(sample_rate * 0.05))
+        target_frames: int = max(1, int(duration_seconds * sample_rate))
+        captured_frames: int = 0
+        chunks: list[bytes] = []
 
         with self._sounddevice.RawInputStream(
-            samplerate=self.voice_config.sample_rate,
+            samplerate=sample_rate,
             channels=1,
             dtype="int16",
-            callback=callback,
-        ):
-            self._sounddevice.sleep(duration_ms)
+            blocksize=block_frames,
+        ) as stream:
+            while captured_frames < target_frames:
+                frames_to_read: int = min(block_frames, target_frames - captured_frames)
+                indata, status = stream.read(frames_to_read)
+                if status:
+                    self.logger.debug("Microphone status: %s", status)
+                chunks.append(bytes(indata))
+                captured_frames += frames_to_read
 
         return b"".join(chunks)
+
+    def _record_until_silence(self, *, max_duration_seconds: float) -> bytes:
+        """Capture PCM16 audio until trailing silence after speech or timeout."""
+        sample_rate: int = self.voice_config.sample_rate
+        max_seconds: float = max(0.5, max_duration_seconds)
+        silence_seconds: float = max(0.1, self.voice_config.end_silence_seconds)
+        silence_threshold: float = self.voice_config.activity_threshold
+
+        block_frames: int = max(1, int(sample_rate * 0.05))
+        max_frames: int = max(1, int(max_seconds * sample_rate))
+        silence_limit_frames: int = max(1, int(silence_seconds * sample_rate))
+        lead_in_limit_frames: int = max(1, int(max(2.0, silence_seconds * 2.0) * sample_rate))
+
+        captured_frames: int = 0
+        silence_frames: int = 0
+        heard_voice: bool = False
+        chunks: list[bytes] = []
+
+        with self._sounddevice.RawInputStream(
+            samplerate=sample_rate,
+            channels=1,
+            dtype="int16",
+            blocksize=block_frames,
+        ) as stream:
+            while captured_frames < max_frames:
+                frames_to_read: int = min(block_frames, max_frames - captured_frames)
+                indata, status = stream.read(frames_to_read)
+                if status:
+                    self.logger.debug("Microphone status: %s", status)
+
+                chunk_bytes: bytes = bytes(indata)
+                chunks.append(chunk_bytes)
+                captured_frames += frames_to_read
+
+                level: float = self._mean_abs_level(chunk_bytes)
+                if level >= silence_threshold:
+                    heard_voice = True
+                    silence_frames = 0
+                    continue
+
+                if heard_voice:
+                    silence_frames += frames_to_read
+                    if silence_frames >= silence_limit_frames:
+                        break
+                elif captured_frames >= lead_in_limit_frames:
+                    break
+
+        return b"".join(chunks)
+
+    def _mean_abs_level(self, pcm_chunk: bytes) -> float:
+        """Return average absolute sample level for a PCM16 chunk."""
+        if not pcm_chunk:
+            return 0.0
+        samples = array("h")
+        samples.frombytes(pcm_chunk)
+        if not samples:
+            return 0.0
+        return sum(abs(sample) for sample in samples) / len(samples)
 
     def _extract_user_note_after_wake_word(self, transcript: str) -> str | None:
         """Return trailing user request after the last wake-word occurrence."""

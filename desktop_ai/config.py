@@ -89,6 +89,8 @@ class VoiceTriggerConfig:
     wake_word: str
     listen_seconds: float
     followup_listen_seconds: float
+    end_silence_seconds: float
+    activity_threshold: float
     sample_rate: int
     transcription_model: str
 
@@ -101,14 +103,36 @@ class VoiceTriggerConfig:
             listen_seconds=_get_env_float("ASSISTANT_VOICE_LISTEN_SECONDS", 3.0),
             followup_listen_seconds=_get_env_float(
                 "ASSISTANT_VOICE_FOLLOWUP_LISTEN_SECONDS",
-                4.0,
+                12.0,
             ),
+            end_silence_seconds=_get_env_float("ASSISTANT_VOICE_END_SILENCE_SECONDS", 1.0),
+            activity_threshold=_get_env_float("ASSISTANT_VOICE_ACTIVITY_THRESHOLD", 450.0),
             sample_rate=_get_env_int("ASSISTANT_VOICE_SAMPLE_RATE", 16000),
             transcription_model=_get_env(
                 "ASSISTANT_VOICE_TRANSCRIPTION_MODEL",
                 "gpt-4o-mini-transcribe",
             )
             or "gpt-4o-mini-transcribe",
+        )
+
+
+@dataclass(slots=True, frozen=True)
+class AvatarConfig:
+    """Desktop avatar overlay settings."""
+
+    enabled: bool
+    auto_move: bool
+    size: int
+    opacity: float
+
+    @classmethod
+    def from_env(cls) -> "AvatarConfig":
+        """Load avatar overlay settings from environment variables."""
+        return cls(
+            enabled=_get_env_bool("ASSISTANT_ENABLE_AVATAR", False),
+            auto_move=_get_env_bool("ASSISTANT_AVATAR_AUTO_MOVE", True),
+            size=max(100, _get_env_int("ASSISTANT_AVATAR_SIZE", 180)),
+            opacity=max(0.4, min(1.0, _get_env_float("ASSISTANT_AVATAR_OPACITY", 0.95))),
         )
 
 
@@ -141,6 +165,40 @@ class ElevenLabsConfig:
 
 
 @dataclass(slots=True, frozen=True)
+class DesktopControlConfig:
+    """Desktop keyboard/mouse control settings."""
+
+    enabled: bool
+    require_approval: bool
+    allowed_launch_commands: tuple[str, ...]
+    max_actions_per_turn: int
+    action_delay_seconds: float
+    action_log_path: Path | None
+
+    @classmethod
+    def from_env(cls, *, artifacts_dir: Path) -> "DesktopControlConfig":
+        """Load desktop-control settings from environment variables."""
+        log_setting: str = _get_env("ASSISTANT_DESKTOP_ACTION_LOG", "actions.log") or "actions.log"
+        log_path: Path | None = None
+        if log_setting.lower() not in {"none", "off", "false", "0"}:
+            configured_path: Path = Path(log_setting)
+            log_path = configured_path if configured_path.is_absolute() else artifacts_dir / configured_path
+
+        allowed_launch_text: str = _get_env("ASSISTANT_DESKTOP_ALLOWED_LAUNCH", "") or ""
+        return cls(
+            enabled=_get_env_bool("ASSISTANT_ENABLE_DESKTOP_CONTROL", False),
+            require_approval=_get_env_bool("ASSISTANT_DESKTOP_REQUIRE_APPROVAL", True),
+            allowed_launch_commands=_split_csv(allowed_launch_text),
+            max_actions_per_turn=max(1, _get_env_int("ASSISTANT_DESKTOP_MAX_ACTIONS_PER_TURN", 5)),
+            action_delay_seconds=max(
+                0.0,
+                min(2.0, _get_env_float("ASSISTANT_DESKTOP_ACTION_DELAY_SECONDS", 0.05)),
+            ),
+            action_log_path=log_path,
+        )
+
+
+@dataclass(slots=True, frozen=True)
 class AssistantConfig:
     """Runtime settings for assistant orchestration."""
 
@@ -151,6 +209,8 @@ class AssistantConfig:
     monitor_index: int
     enable_speech: bool
     voice_trigger: VoiceTriggerConfig
+    avatar: AvatarConfig
+    desktop_control: DesktopControlConfig
     system_prompt: str
     log_level: str
 
@@ -161,14 +221,17 @@ class AssistantConfig:
             _get_env("ASSISTANT_CONTEXT_PROVIDERS", "timestamp,environment,active_window")
             or "timestamp,environment,active_window"
         )
+        artifacts_dir: Path = Path(_get_env("ASSISTANT_ARTIFACTS_DIR", "./artifacts") or "./artifacts")
         return cls(
             openai=OpenAIConfig.from_env(),
             interval_seconds=_get_env_float("ASSISTANT_INTERVAL_SECONDS", 8.0),
             context_provider_names=_split_csv(providers_text),
-            artifacts_dir=Path(_get_env("ASSISTANT_ARTIFACTS_DIR", "./artifacts") or "./artifacts"),
+            artifacts_dir=artifacts_dir,
             monitor_index=_get_env_int("ASSISTANT_MONITOR_INDEX", 1),
             enable_speech=_get_env_bool("ASSISTANT_ENABLE_SPEECH", True),
             voice_trigger=VoiceTriggerConfig.from_env(),
+            avatar=AvatarConfig.from_env(),
+            desktop_control=DesktopControlConfig.from_env(artifacts_dir=artifacts_dir),
             system_prompt=_get_env("ASSISTANT_SYSTEM_PROMPT", DEFAULT_SYSTEM_PROMPT)
             or DEFAULT_SYSTEM_PROMPT,
             log_level=_get_env("ASSISTANT_LOG_LEVEL", "INFO") or "INFO",

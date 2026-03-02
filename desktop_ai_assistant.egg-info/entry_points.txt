@@ -1,2 +1,3 @@
 [console_scripts]
 desktop-ai = desktop_ai.cli:main
+desktop-ai-launcher = desktop_ai.launcher:main

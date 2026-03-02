@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 from typing import Protocol
 
-from desktop_ai.types import CapturedScreen, VoiceActivation
+from desktop_ai.types import AssistantPresenceState, CapturedScreen, VoiceActivation
 
 
 class ContextCollector(Protocol):
@@ -46,5 +47,22 @@ class AudioOutput(Protocol):
 class VoiceTriggerListener(Protocol):
     """Waits for wake-word activation from microphone input."""
 
-    def listen_for_activation(self) -> VoiceActivation | None:
+    def listen_for_activation(
+        self,
+        *,
+        on_wake_word_detected: Callable[[], None] | None = None,
+    ) -> VoiceActivation | None:
         """Return activation details when wake-word is heard, else None."""
+
+
+class PresenceOverlay(Protocol):
+    """Receives assistant presence state updates for UI rendering."""
+
+    def start(self) -> None:
+        """Start rendering overlay resources."""
+
+    def stop(self) -> None:
+        """Stop rendering overlay resources and release resources."""
+
+    def set_state(self, state: AssistantPresenceState) -> None:
+        """Update visible assistant presence state."""

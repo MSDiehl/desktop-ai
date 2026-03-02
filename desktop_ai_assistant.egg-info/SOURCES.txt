@@ -4,11 +4,14 @@ desktop_ai/__init__.py
 desktop_ai/__main__.py
 desktop_ai/assistant.py
 desktop_ai/audio.py
+desktop_ai/avatar.py
 desktop_ai/cli.py
 desktop_ai/config.py
 desktop_ai/context.py
+desktop_ai/desktop_control.py
 desktop_ai/elevenlabs_client.py
 desktop_ai/interfaces.py
+desktop_ai/launcher.py
 desktop_ai/openai_client.py
 desktop_ai/prompting.py
 desktop_ai/screen.py

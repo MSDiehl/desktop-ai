@@ -5,6 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any, Literal, TypeAlias
+
+AssistantPresenceState: TypeAlias = Literal["idle", "listening", "thinking", "speaking"]
 
 
 @dataclass(slots=True, frozen=True)
@@ -36,6 +39,36 @@ class AssistantTurnResult:
     response_text: str
     context: dict[str, str]
     audio_path: Path | None
+    started_at: datetime
+    finished_at: datetime
+    action_plan: "DesktopActionPlan | None" = None
+    action_results: tuple["ActionExecutionResult", ...] = ()
+
+
+@dataclass(slots=True, frozen=True)
+class DesktopAction:
+    """Represents one desktop action the assistant can execute."""
+
+    type: str
+    args: dict[str, Any]
+
+
+@dataclass(slots=True, frozen=True)
+class DesktopActionPlan:
+    """Represents a parsed model response with optional desktop actions."""
+
+    spoken_reply: str
+    actions: tuple[DesktopAction, ...]
+    raw_response: str
+
+
+@dataclass(slots=True, frozen=True)
+class ActionExecutionResult:
+    """Represents one action execution attempt."""
+
+    action: DesktopAction
+    success: bool
+    detail: str
     started_at: datetime
     finished_at: datetime
 

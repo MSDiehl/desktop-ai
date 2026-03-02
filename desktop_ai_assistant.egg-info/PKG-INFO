@@ -6,6 +6,7 @@ Requires-Python: >=3.11
 Description-Content-Type: text/markdown
 Requires-Dist: mss>=10.0.0
 Requires-Dist: openai>=1.58.1
+Requires-Dist: pyautogui>=0.9.54
 Requires-Dist: psutil>=6.1.0
 Requires-Dist: python-dotenv>=1.0.1
 Requires-Dist: requests>=2.32.3
@@ -24,19 +25,24 @@ It then:
 - Uses OpenAI transcription for wake-word voice activation.
 - Uses ElevenLabs for TTS.
 - Saves audio output and optionally plays it locally.
+- Optionally executes desktop actions (keyboard, mouse, launch commands).
 
 ## Features
 
 - Strongly typed architecture with Protocol-based components.
 - Docstrings on all functions and methods.
 - Dynamic context-provider registry for easy expansion.
+- Tkinter desktop launcher for editing `.env` settings and starting/stopping AI.
 - CLI-first workflow for one-shot or continuous assistant loops.
 - Optional wake-word trigger (for example: `Lune, what do you think of this?`).
+- Optional always-on-top avatar overlay with `idle/listening/thinking/speaking` states.
+- Optional desktop-control mode with bounded actions, approval prompts, and action logs.
 
 ## Project layout
 
 `desktop_ai/`
 - `assistant.py`: orchestration loop.
+- `launcher.py`: settings UI + start/stop launcher window.
 - `config.py`: typed env config.
 - `context.py`: pluggable context providers.
 - `screen.py`: screenshot capture (mss).
@@ -44,6 +50,8 @@ It then:
 - `voice_activation.py`: microphone capture + wake-word transcription.
 - `elevenlabs_client.py`: ElevenLabs TTS integration.
 - `audio.py`: local WAV storage/playback.
+- `avatar.py`: desktop avatar overlay and state animation.
+- `desktop_control.py`: action-plan parsing + keyboard/mouse/app execution.
 - `cli.py`: command-line entrypoint.
 
 ## Setup
@@ -63,6 +71,25 @@ pip install -e .
 Optional for wake-word mode:
 - `ASSISTANT_ENABLE_VOICE_TRIGGER=true`
 - `ASSISTANT_WAKE_WORD=Lune`
+- `ASSISTANT_VOICE_END_SILENCE_SECONDS=1.0` (stop follow-up capture after trailing silence)
+- `ASSISTANT_VOICE_FOLLOWUP_LISTEN_SECONDS=12.0` (max follow-up capture length safety cap)
+- `ASSISTANT_VOICE_ACTIVITY_THRESHOLD=450` (raise if background noise causes premature triggers)
+
+Optional for avatar overlay:
+- `ASSISTANT_ENABLE_AVATAR=true`
+- `ASSISTANT_AVATAR_AUTO_MOVE=true`
+
+Optional for desktop control:
+- `ASSISTANT_ENABLE_DESKTOP_CONTROL=true`
+- `ASSISTANT_DESKTOP_REQUIRE_APPROVAL=true` (recommended safety default)
+- `ASSISTANT_DESKTOP_ALLOWED_LAUNCH=notepad,code,calc` (prefix allowlist for launch actions)
+- `ASSISTANT_DESKTOP_MAX_ACTIONS_PER_TURN=5`
+- `ASSISTANT_DESKTOP_ACTION_LOG=actions.log` (written under `ASSISTANT_ARTIFACTS_DIR` unless absolute)
+
+Desktop-control dependency:
+- Install `pyautogui` via `pip install -e .` (already included in this project dependencies).
+- On macOS, grant Accessibility + Screen Recording permissions.
+- On Linux Wayland, input injection may be restricted by compositor settings.
 
 ## Usage
 
@@ -84,6 +111,36 @@ Continuous loop with wake-word activation:
 python -m desktop_ai --voice-trigger --wake-word Lune
 ```
 
+Continuous loop with wake-word + avatar:
+
+```bash
+python -m desktop_ai --voice-trigger --avatar
+```
+
+Launcher UI (edit `.env`, then Power On/Stop from one window):
+
+```bash
+desktop-ai-launcher
+```
+
+Or:
+
+```bash
+python desktop_ai_launcher.py
+```
+
+Desktop control with per-plan approval:
+
+```bash
+python -m desktop_ai --desktop-control --voice-trigger
+```
+
+Desktop control trusted mode (no prompt):
+
+```bash
+python -m desktop_ai --desktop-control --auto-approve-actions --allow-launch notepad,code
+```
+
 Useful options:
 
 ```bash
@@ -91,6 +148,9 @@ python -m desktop_ai --interval 6 --note "Focus on gaming commentary"
 python -m desktop_ai --once --no-speech
 python -m desktop_ai --context-providers timestamp,active_window --once
 python -m desktop_ai --no-voice-trigger
+python -m desktop_ai --voice-trigger --avatar --avatar-opacity 0.9
+python -m desktop_ai --avatar --no-avatar-auto-move
+python -m desktop_ai --desktop-control --max-actions-per-turn 3
 ```
 
 ## Dynamic extension points
@@ -107,6 +167,29 @@ To swap AI/TTS providers:
 ## Notes
 
 - Artifacts are written to `./artifacts/audio` by default.
+- Desktop action logs are written to `./artifacts/actions.log` by default.
 - Response length can be reduced with `OPENAI_MAX_OUTPUT_TOKENS` in `.env`.
 - On Unix, playback uses `afplay`, `aplay`, or `paplay` if installed.
 - On Windows, playback uses `winsound` with WAV output.
+- `pyautogui` failsafe is enabled: moving mouse rapidly to top-left should raise a failsafe exception.
+
+## Build a Windows `.exe`
+
+1. Install project + PyInstaller in your Windows venv:
+
+```bash
+pip install -e .
+pip install pyinstaller
+```
+
+2. Build the launcher executable:
+
+```bash
+pyinstaller --noconfirm --clean --onefile --windowed --name DesktopAIAssistant desktop_ai_launcher.py
+```
+
+3. Copy your `.env` next to the built exe:
+- output exe: `dist/DesktopAIAssistant.exe`
+- expected env path: `dist/.env`
+
+After that, users can double-click the exe, edit settings in the window, click **Power On AI**, and reopen from the taskbar to stop it.

@@ -11,6 +11,7 @@ requires-python = ">=3.11"
 dependencies = [
   "mss>=10.0.0",
   "openai>=1.58.1",
+  "pyautogui>=0.9.54",
   "psutil>=6.1.0",
   "python-dotenv>=1.0.1",
   "requests>=2.32.3",
@@ -19,6 +20,7 @@ dependencies = [
 
 [project.scripts]
 desktop-ai = "desktop_ai.cli:main"
+desktop-ai-launcher = "desktop_ai.launcher:main"
 
 [tool.setuptools.packages.find]
 include = ["desktop_ai*"]

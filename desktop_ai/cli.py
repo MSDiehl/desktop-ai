@@ -4,18 +4,21 @@ from __future__ import annotations
 
 import argparse
 import logging
+import sys
 from dataclasses import replace
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 
 from dotenv import load_dotenv
 
 from desktop_ai.assistant import DesktopAssistant
 from desktop_ai.audio import LocalAudioOutput
-from desktop_ai.config import AssistantConfig, ElevenLabsConfig
+from desktop_ai.config import AssistantConfig, AvatarConfig, DesktopControlConfig, ElevenLabsConfig
 from desktop_ai.context import CompositeContextCollector, build_default_context_registry
+from desktop_ai.desktop_control import DesktopController, format_action
 from desktop_ai.elevenlabs_client import ElevenLabsSpeechSynthesizer
 from desktop_ai.openai_client import OpenAITextGenerator
 from desktop_ai.screen import MSSScreenCapturer
+from desktop_ai.types import DesktopActionPlan
 from desktop_ai.voice_activation import OpenAIWakeWordListener
 
 
@@ -39,6 +42,49 @@ def build_parser() -> argparse.ArgumentParser:
     voice_group.add_argument("--voice-trigger", action="store_true", help="Enable wake-word voice activation.")
     voice_group.add_argument("--no-voice-trigger", action="store_true", help="Disable wake-word voice activation.")
     parser.add_argument("--wake-word", type=str, default=None, help="Override wake word (default from env).")
+    avatar_group = parser.add_mutually_exclusive_group()
+    avatar_group.add_argument("--avatar", action="store_true", help="Enable always-on-top desktop avatar overlay.")
+    avatar_group.add_argument("--no-avatar", action="store_true", help="Disable desktop avatar overlay.")
+    parser.add_argument(
+        "--no-avatar-auto-move",
+        action="store_true",
+        help="Disable autonomous movement for the desktop avatar.",
+    )
+    parser.add_argument("--avatar-size", type=int, default=None, help="Avatar window size in pixels.")
+    parser.add_argument(
+        "--avatar-opacity",
+        type=float,
+        default=None,
+        help="Avatar opacity from 0.4 to 1.0.",
+    )
+    desktop_control_group = parser.add_mutually_exclusive_group()
+    desktop_control_group.add_argument(
+        "--desktop-control",
+        action="store_true",
+        help="Enable keyboard/mouse/application control actions.",
+    )
+    desktop_control_group.add_argument(
+        "--no-desktop-control",
+        action="store_true",
+        help="Disable keyboard/mouse/application control actions.",
+    )
+    parser.add_argument(
+        "--auto-approve-actions",
+        action="store_true",
+        help="Execute desktop actions without interactive confirmation.",
+    )
+    parser.add_argument(
+        "--allow-launch",
+        type=str,
+        default=None,
+        help="Comma-separated command prefixes allowed for launch actions (for example: notepad,code).",
+    )
+    parser.add_argument(
+        "--max-actions-per-turn",
+        type=int,
+        default=None,
+        help="Upper bound for desktop actions executed in a single assistant turn.",
+    )
     return parser
 
 
@@ -53,6 +99,31 @@ def configure_logging(level: str) -> None:
 def _split_cli_csv(value: str) -> tuple[str, ...]:
     """Split comma-separated CLI values."""
     return tuple(item.strip() for item in value.split(",") if item.strip())
+
+
+def _build_action_approval_callback() -> Callable[[DesktopActionPlan], bool]:
+    """Build an interactive callback for approving action plans."""
+
+    def callback(plan: DesktopActionPlan) -> bool:
+        stdin = sys.stdin
+        if stdin is None or not hasattr(stdin, "isatty") or not stdin.isatty():
+            logging.getLogger(__name__).warning(
+                "Desktop actions were requested but stdin is unavailable/non-interactive; denying by default."
+            )
+            return False
+        print("Desktop action plan proposed:")
+        for index, action in enumerate(plan.actions, start=1):
+            print(f"{index}. {format_action(action)}")
+        try:
+            decision: str = input("Approve these actions? [y/N]: ").strip().lower()
+        except EOFError:
+            logging.getLogger(__name__).warning(
+                "Desktop action approval prompt failed due to EOF; denying by default."
+            )
+            return False
+        return decision in {"y", "yes"}
+
+    return callback
 
 
 def build_assistant(args: argparse.Namespace) -> tuple[DesktopAssistant, AssistantConfig]:
@@ -102,6 +173,69 @@ def build_assistant(args: argparse.Namespace) -> tuple[DesktopAssistant, Assista
             autoplay=not args.no_autoplay,
         )
 
+    avatar_config: AvatarConfig = config.avatar
+    if args.avatar:
+        avatar_config = replace(avatar_config, enabled=True)
+    if args.no_avatar:
+        avatar_config = replace(avatar_config, enabled=False)
+    if args.no_avatar_auto_move:
+        avatar_config = replace(avatar_config, auto_move=False)
+    if args.avatar_size is not None:
+        avatar_config = replace(avatar_config, size=max(100, args.avatar_size))
+    if args.avatar_opacity is not None:
+        opacity: float = max(0.4, min(1.0, args.avatar_opacity))
+        avatar_config = replace(avatar_config, opacity=opacity)
+
+    desktop_control_config: DesktopControlConfig = config.desktop_control
+    if args.desktop_control:
+        desktop_control_config = replace(desktop_control_config, enabled=True)
+    if args.no_desktop_control:
+        desktop_control_config = replace(desktop_control_config, enabled=False)
+    if args.auto_approve_actions:
+        desktop_control_config = replace(desktop_control_config, require_approval=False)
+    if args.allow_launch is not None:
+        desktop_control_config = replace(
+            desktop_control_config,
+            allowed_launch_commands=_split_cli_csv(args.allow_launch),
+        )
+    if args.max_actions_per_turn is not None:
+        desktop_control_config = replace(
+            desktop_control_config,
+            max_actions_per_turn=max(1, args.max_actions_per_turn),
+        )
+
+    presence_overlay = None
+    if avatar_config.enabled:
+        try:
+            from desktop_ai.avatar import TkAvatarOverlay
+
+            presence_overlay = TkAvatarOverlay(
+                auto_move=avatar_config.auto_move,
+                size=avatar_config.size,
+                opacity=avatar_config.opacity,
+                logger=logging.getLogger("desktop_ai.avatar"),
+            )
+            presence_overlay.start()
+        except Exception as error:
+            logging.getLogger(__name__).warning("Avatar overlay disabled: %s", error)
+
+    desktop_controller = None
+    action_approval_callback: Callable[[DesktopActionPlan], bool] | None = None
+    if desktop_control_config.enabled:
+        try:
+            desktop_controller = DesktopController(
+                require_approval=desktop_control_config.require_approval,
+                allowed_launch_commands=desktop_control_config.allowed_launch_commands,
+                max_actions_per_turn=desktop_control_config.max_actions_per_turn,
+                action_delay_seconds=desktop_control_config.action_delay_seconds,
+                log_path=desktop_control_config.action_log_path,
+                logger=logging.getLogger("desktop_ai.desktop_control"),
+            )
+            if desktop_control_config.require_approval:
+                action_approval_callback = _build_action_approval_callback()
+        except Exception as error:
+            logging.getLogger(__name__).warning("Desktop control disabled: %s", error)
+
     assistant = DesktopAssistant(
         context_collector=context_collector,
         screen_capturer=screen_capturer,
@@ -109,6 +243,9 @@ def build_assistant(args: argparse.Namespace) -> tuple[DesktopAssistant, Assista
         speech_synthesizer=speech_synthesizer,
         audio_output=audio_output,
         voice_trigger_listener=voice_trigger_listener,
+        presence_overlay=presence_overlay,
+        desktop_controller=desktop_controller,
+        action_approval_callback=action_approval_callback,
         enable_speech=speech_enabled,
         logger=logging.getLogger("desktop_ai.assistant"),
     )
@@ -121,14 +258,21 @@ def run(args: argparse.Namespace) -> int:
     assistant, config = build_assistant(args)
     interval_seconds: float = args.interval if args.interval is not None else config.interval_seconds
 
-    if args.once:
-        result = assistant.run_once(user_note=args.note)
-        print(result.response_text)
-        if result.audio_path is not None:
-            print(f"Audio saved: {result.audio_path}")
-        return 0
-
     try:
+        if args.once:
+            result = assistant.run_once(user_note=args.note)
+            print(result.response_text)
+            if result.action_results:
+                for index, action_result in enumerate(result.action_results, start=1):
+                    status: str = "ok" if action_result.success else "failed"
+                    print(
+                        f"Action {index} [{status}]: {format_action(action_result.action)} | "
+                        f"{action_result.detail}"
+                    )
+            if result.audio_path is not None:
+                print(f"Audio saved: {result.audio_path}")
+            return 0
+
         assistant.run_loop(
             interval_seconds=interval_seconds,
             user_note=args.note,
@@ -136,6 +280,8 @@ def run(args: argparse.Namespace) -> int:
         )
     except KeyboardInterrupt:
         logging.getLogger(__name__).info("Stopped by user.")
+    finally:
+        assistant.close()
     return 0
 
 

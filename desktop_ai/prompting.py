@@ -13,10 +13,62 @@ def build_context_block(context: Mapping[str, str]) -> str:
     return "\n".join(lines)
 
 
-def build_user_prompt(context: Mapping[str, str], user_note: str | None = None) -> str:
+def build_user_prompt(
+    context: Mapping[str, str],
+    user_note: str | None = None,
+    *,
+    desktop_control_enabled: bool = False,
+    max_actions_per_turn: int = 5,
+    allowed_launch_commands: tuple[str, ...] = (),
+) -> str:
     """Build the user message that accompanies the screenshot."""
     note: str = user_note.strip() if user_note else ""
     context_block: str = build_context_block(context)
+    if desktop_control_enabled:
+        launch_scope: str = (
+            ", ".join(allowed_launch_commands)
+            if allowed_launch_commands
+            else "(none; launch commands will be rejected)"
+        )
+        if note:
+            note_block: str = f"User note:\n{note}\n"
+        else:
+            note_block = (
+                "No explicit user note was captured.\n"
+                "Do not execute any desktop actions unless a direct user request is clear.\n"
+            )
+        return (
+            "You are speaking to the user in real time as their buddy, Sophie.\n"
+            "Desktop control mode is enabled.\n\n"
+            "Return exactly one JSON object with this schema:\n"
+            "{\n"
+            '  "spoken_reply": "<what you will say aloud>",\n'
+            '  "actions": [\n'
+            '    {"type": "<action type>", "...": "action args"}\n'
+            "  ]\n"
+            "}\n\n"
+            "Rules:\n"
+            "- `spoken_reply` must always be present and conversational.\n"
+            "- `actions` must be present; use [] when no action is needed.\n"
+            f"- Emit at most {max(1, max_actions_per_turn)} actions.\n"
+            "- If a request is ambiguous, ask a clarifying question in `spoken_reply` and use `actions: []`.\n"
+            "- Never invent action types.\n"
+            "- Keep `spoken_reply` short (1 to 3 sentences).\n"
+            "- Launch allowlist prefixes: "
+            f"{launch_scope}\n\n"
+            "Supported action types and args:\n"
+            '- `move_mouse`: {"type":"move_mouse","x":int,"y":int,"duration":float?}\n'
+            '- `drag_mouse`: {"type":"drag_mouse","x":int,"y":int,"duration":float?,"button":"left|middle|right"?}\n'
+            '- `click`: {"type":"click","x":int?,"y":int?,"button":"left|middle|right"?,"clicks":int?,"interval":float?}\n'
+            '- `type_text`: {"type":"type_text","text":str,"interval":float?}\n'
+            '- `press`: {"type":"press","key":str,"presses":int?,"interval":float?}\n'
+            '- `hotkey`: {"type":"hotkey","keys":[str,str,...]}  # at least 2 keys\n'
+            '- `scroll`: {"type":"scroll","amount":int}\n'
+            '- `launch`: {"type":"launch","command":str}\n'
+            '- `wait`: {"type":"wait","seconds":float}\n\n'
+            f"{note_block}\n"
+            f"Structured context:\n{context_block}\n"
+        )
     if note:
         return (
             "You are speaking to the user in real time as their buddy, Sophie.\n"
