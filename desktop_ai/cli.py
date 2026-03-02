@@ -16,6 +16,7 @@ from desktop_ai.config import AssistantConfig, AvatarConfig, DesktopControlConfi
 from desktop_ai.context import CompositeContextCollector, build_default_context_registry
 from desktop_ai.desktop_control import DesktopController, format_action
 from desktop_ai.elevenlabs_client import ElevenLabsSpeechSynthesizer
+from desktop_ai.memory import SQLiteMemoryStore
 from desktop_ai.openai_client import OpenAITextGenerator
 from desktop_ai.screen import MSSScreenCapturer
 from desktop_ai.types import DesktopActionPlan
@@ -236,6 +237,16 @@ def build_assistant(args: argparse.Namespace) -> tuple[DesktopAssistant, Assista
         except Exception as error:
             logging.getLogger(__name__).warning("Desktop control disabled: %s", error)
 
+    memory_store = None
+    if config.memory.enabled:
+        try:
+            memory_store = SQLiteMemoryStore(
+                config=config.memory,
+                logger=logging.getLogger("desktop_ai.memory"),
+            )
+        except Exception as error:
+            logging.getLogger(__name__).warning("Memory store disabled: %s", error)
+
     assistant = DesktopAssistant(
         context_collector=context_collector,
         screen_capturer=screen_capturer,
@@ -245,6 +256,9 @@ def build_assistant(args: argparse.Namespace) -> tuple[DesktopAssistant, Assista
         voice_trigger_listener=voice_trigger_listener,
         presence_overlay=presence_overlay,
         desktop_controller=desktop_controller,
+        memory_store=memory_store,
+        memory_recall_limit=config.memory.recall_limit,
+        memory_prompt_chars=config.memory.prompt_entry_chars,
         action_approval_callback=action_approval_callback,
         enable_speech=speech_enabled,
         logger=logging.getLogger("desktop_ai.assistant"),

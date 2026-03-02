@@ -67,6 +67,7 @@ DEFAULT_ENV_VALUES: dict[str, str] = {
     "ASSISTANT_WAKE_WORD": "Lune",
     "ASSISTANT_VOICE_LISTEN_SECONDS": "3.0",
     "ASSISTANT_VOICE_FOLLOWUP_LISTEN_SECONDS": "12.0",
+    "ASSISTANT_VOICE_START_SILENCE_SECONDS": "3.0",
     "ASSISTANT_VOICE_END_SILENCE_SECONDS": "1.0",
     "ASSISTANT_VOICE_ACTIVITY_THRESHOLD": "450",
     "ASSISTANT_VOICE_SAMPLE_RATE": "16000",
@@ -81,6 +82,13 @@ DEFAULT_ENV_VALUES: dict[str, str] = {
     "ASSISTANT_DESKTOP_MAX_ACTIONS_PER_TURN": "5",
     "ASSISTANT_DESKTOP_ACTION_DELAY_SECONDS": "0.05",
     "ASSISTANT_DESKTOP_ACTION_LOG": "actions.log",
+    "ASSISTANT_ENABLE_MEMORY": "true",
+    "ASSISTANT_MEMORY_DB": "memory.sqlite3",
+    "ASSISTANT_MEMORY_MAX_ENTRIES": "5000",
+    "ASSISTANT_MEMORY_RECALL_LIMIT": "6",
+    "ASSISTANT_MEMORY_PROMPT_CHARS": "240",
+    "ASSISTANT_MEMORY_CONTEXT_CHARS": "1200",
+    "ASSISTANT_MEMORY_SEARCH_LOOKBACK": "1500",
     "ASSISTANT_LOG_LEVEL": "INFO",
     "ASSISTANT_SYSTEM_PROMPT": (
         "You are Sophie, a friendly desktop AI buddy. "
@@ -113,6 +121,7 @@ SETTING_FIELDS: tuple[SettingField, ...] = (
     SettingField("ASSISTANT_WAKE_WORD", "Wake Word", "Voice"),
     SettingField("ASSISTANT_VOICE_LISTEN_SECONDS", "Listen Seconds", "Voice"),
     SettingField("ASSISTANT_VOICE_FOLLOWUP_LISTEN_SECONDS", "Follow-up Listen Seconds", "Voice"),
+    SettingField("ASSISTANT_VOICE_START_SILENCE_SECONDS", "Start Silence Seconds", "Voice"),
     SettingField("ASSISTANT_VOICE_END_SILENCE_SECONDS", "End Silence Seconds", "Voice"),
     SettingField("ASSISTANT_VOICE_ACTIVITY_THRESHOLD", "Activity Threshold", "Voice"),
     SettingField("ASSISTANT_VOICE_SAMPLE_RATE", "Sample Rate", "Voice"),
@@ -137,6 +146,13 @@ SETTING_FIELDS: tuple[SettingField, ...] = (
     SettingField("ASSISTANT_DESKTOP_MAX_ACTIONS_PER_TURN", "Max Actions Per Turn", "Desktop Control"),
     SettingField("ASSISTANT_DESKTOP_ACTION_DELAY_SECONDS", "Action Delay Seconds", "Desktop Control"),
     SettingField("ASSISTANT_DESKTOP_ACTION_LOG", "Action Log File", "Desktop Control"),
+    SettingField("ASSISTANT_ENABLE_MEMORY", "Enable Persistent Memory", "Memory", "bool"),
+    SettingField("ASSISTANT_MEMORY_DB", "Memory DB File", "Memory", width=56),
+    SettingField("ASSISTANT_MEMORY_MAX_ENTRIES", "Max Stored Memories", "Memory"),
+    SettingField("ASSISTANT_MEMORY_RECALL_LIMIT", "Memories Recalled Per Turn", "Memory"),
+    SettingField("ASSISTANT_MEMORY_PROMPT_CHARS", "Chars Per Memory Snippet", "Memory"),
+    SettingField("ASSISTANT_MEMORY_CONTEXT_CHARS", "Max Context Chars Per Memory", "Memory"),
+    SettingField("ASSISTANT_MEMORY_SEARCH_LOOKBACK", "Recall Search Lookback", "Memory"),
 )
 
 SECTION_ORDER: tuple[str, ...] = (
@@ -146,6 +162,7 @@ SECTION_ORDER: tuple[str, ...] = (
     "Voice",
     "Avatar",
     "Desktop Control",
+    "Memory",
 )
 
 

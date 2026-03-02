@@ -13,6 +13,7 @@ It then:
 - Uses OpenAI transcription for wake-word voice activation.
 - Uses ElevenLabs for TTS.
 - Saves audio output and optionally plays it locally.
+- Persists long-term memory of turns and recalls relevant past events each turn.
 - Optionally executes desktop actions (keyboard, mouse, launch commands).
 
 ## Features
@@ -25,6 +26,7 @@ It then:
 - Optional wake-word trigger (for example: `Lune, what do you think of this?`).
 - Optional always-on-top avatar overlay with `idle/listening/thinking/speaking` states.
 - Optional desktop-control mode with bounded actions, approval prompts, and action logs.
+- SQLite-backed memory store with bounded retention + relevance recall.
 
 ## Project layout
 
@@ -41,6 +43,7 @@ It then:
 - `audio.py`: local WAV storage/playback.
 - `avatar.py`: desktop avatar overlay and state animation.
 - `desktop_control.py`: action-plan parsing + keyboard/mouse/app execution.
+- `memory.py`: persistent memory storage + recall ranking.
 - `cli.py`: command-line entrypoint.
 
 ## Setup
@@ -62,6 +65,7 @@ Optional for wake-word mode:
 
 - `ASSISTANT_ENABLE_VOICE_TRIGGER=true`
 - `ASSISTANT_WAKE_WORD=Lune`
+- `ASSISTANT_VOICE_START_SILENCE_SECONDS=3.0` (max silence to wait for you to start speaking after wake word)
 - `ASSISTANT_VOICE_END_SILENCE_SECONDS=1.0` (stop follow-up capture after trailing silence)
 - `ASSISTANT_VOICE_FOLLOWUP_LISTEN_SECONDS=12.0` (max follow-up capture length safety cap)
 - `ASSISTANT_VOICE_ACTIVITY_THRESHOLD=450` (raise if background noise causes premature triggers)
@@ -78,6 +82,16 @@ Optional for desktop control:
 - `ASSISTANT_DESKTOP_ALLOWED_LAUNCH=notepad,code,calc` (prefix allowlist for launch actions)
 - `ASSISTANT_DESKTOP_MAX_ACTIONS_PER_TURN=5`
 - `ASSISTANT_DESKTOP_ACTION_LOG=actions.log` (written under `ASSISTANT_ARTIFACTS_DIR` unless absolute)
+
+Optional for persistent memory:
+
+- `ASSISTANT_ENABLE_MEMORY=true`
+- `ASSISTANT_MEMORY_DB=memory.sqlite3` (written under `ASSISTANT_ARTIFACTS_DIR` unless absolute)
+- `ASSISTANT_MEMORY_MAX_ENTRIES=5000`
+- `ASSISTANT_MEMORY_RECALL_LIMIT=6`
+- `ASSISTANT_MEMORY_PROMPT_CHARS=240`
+- `ASSISTANT_MEMORY_CONTEXT_CHARS=1200`
+- `ASSISTANT_MEMORY_SEARCH_LOOKBACK=1500`
 
 Desktop-control dependency:
 
@@ -164,6 +178,7 @@ To swap AI/TTS providers:
 
 - Artifacts are written to `./artifacts/audio` by default.
 - Desktop action logs are written to `./artifacts/actions.log` by default.
+- Memory DB is written to `./artifacts/memory.sqlite3` by default.
 - Response length can be reduced with `OPENAI_MAX_OUTPUT_TOKENS` in `.env`.
 - On Unix, playback uses `afplay`, `aplay`, or `paplay` if installed.
 - On Windows, playback uses `winsound` with WAV output.

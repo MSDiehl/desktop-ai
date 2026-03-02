@@ -57,9 +57,9 @@ class OpenAIWakeWordListener:
     ) -> VoiceActivation | None:
         """Listen to microphone and return activation when wake-word is heard."""
         try:
-            # Keep wake-word detection responsive while still long enough to capture
-            # wake word + the beginning of the user request in one pass.
-            detection_seconds: float = max(0.8, min(self.voice_config.listen_seconds, 2.0))
+            # Respect configured detection window so longer first utterances are not
+            # prematurely cut off before the follow-up capture starts.
+            detection_seconds: float = max(0.8, self.voice_config.listen_seconds)
             pcm_audio: bytes = self._record_clip(duration_seconds=detection_seconds)
             transcript: str = self._transcribe(pcm_audio)
         except Exception as error:
@@ -79,24 +79,31 @@ class OpenAIWakeWordListener:
                 self.logger.debug("Wake-word callback failed: %s", error)
 
         self.logger.debug("Wake-word transcript: %s", transcript)
-        user_note: str | None = self._extract_user_note_after_wake_word(transcript)
-        if user_note is None:
-            # If wake word was detected but no trailing text was captured, record a short
-            # follow-up clip and stop on silence so speech does not get cut off early.
-            try:
-                followup_pcm: bytes = self._record_clip(
-                    duration_seconds=self.voice_config.followup_listen_seconds,
-                    stop_on_silence=True,
-                )
-                followup_transcript: str = self._transcribe(followup_pcm)
-            except Exception as error:
-                self.logger.warning("Voice activation follow-up listen failed: %s", error)
-                followup_transcript = ""
+        initial_note: str | None = self._extract_user_note_after_wake_word(transcript)
 
-            followup_note: str | None = self._clean_user_note(followup_transcript)
-            if followup_note:
-                transcript = f"{transcript} {followup_transcript}".strip()
-                user_note = followup_note
+        # Always capture a follow-up segment after wake detection so we continue
+        # listening until trailing silence even if the first clip captured partial text.
+        try:
+            followup_pcm: bytes = self._record_clip(
+                duration_seconds=self.voice_config.followup_listen_seconds,
+                stop_on_silence=True,
+            )
+            followup_transcript: str = self._transcribe(followup_pcm)
+        except Exception as error:
+            self.logger.warning("Voice activation follow-up listen failed: %s", error)
+            followup_transcript = ""
+
+        followup_note: str | None = self._extract_user_note_after_wake_word(followup_transcript)
+        if followup_note is None:
+            followup_note = self._clean_user_note(followup_transcript)
+
+        if followup_transcript:
+            transcript = f"{transcript} {followup_transcript}".strip()
+
+        user_note: str | None = self._merge_user_notes(
+            initial_note=initial_note,
+            followup_note=followup_note,
+        )
 
         self.logger.debug("Wake-word user note: %s", user_note)
         return VoiceActivation(
@@ -148,12 +155,17 @@ class OpenAIWakeWordListener:
         sample_rate: int = self.voice_config.sample_rate
         max_seconds: float = max(0.5, max_duration_seconds)
         silence_seconds: float = max(0.1, self.voice_config.end_silence_seconds)
+        lead_in_seconds: float = max(
+            0.1,
+            self.voice_config.start_silence_seconds,
+            silence_seconds * 2.0,
+        )
         silence_threshold: float = self.voice_config.activity_threshold
 
         block_frames: int = max(1, int(sample_rate * 0.05))
         max_frames: int = max(1, int(max_seconds * sample_rate))
         silence_limit_frames: int = max(1, int(silence_seconds * sample_rate))
-        lead_in_limit_frames: int = max(1, int(max(2.0, silence_seconds * 2.0) * sample_rate))
+        lead_in_limit_frames: int = max(1, int(lead_in_seconds * sample_rate))
 
         captured_frames: int = 0
         silence_frames: int = 0
@@ -213,6 +225,26 @@ class OpenAIWakeWordListener:
         """Normalize a transcribed user request snippet."""
         cleaned: str = text.lstrip(" ,:;.!?-").strip()
         return cleaned or None
+
+    def _merge_user_notes(
+        self,
+        *,
+        initial_note: str | None,
+        followup_note: str | None,
+    ) -> str | None:
+        """Merge notes from detection and follow-up clips with simple overlap handling."""
+        if initial_note is None:
+            return followup_note
+        if followup_note is None:
+            return initial_note
+
+        initial_lower: str = initial_note.lower()
+        followup_lower: str = followup_note.lower()
+        if followup_lower.startswith(initial_lower):
+            return followup_note
+        if initial_lower.startswith(followup_lower):
+            return initial_note
+        return f"{initial_note} {followup_note}".strip()
 
     def _transcribe(self, pcm_audio: bytes) -> str:
         """Transcribe WAV audio through OpenAI and return plain text."""

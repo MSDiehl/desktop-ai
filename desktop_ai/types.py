@@ -32,6 +32,19 @@ class CapturedScreen:
 
 
 @dataclass(slots=True, frozen=True)
+class MemoryRecord:
+    """Represents one persisted assistant memory available for recall."""
+
+    id: int
+    created_at: datetime
+    user_note: str
+    assistant_reply: str
+    action_summary: str
+    context_summary: str
+    score: float = 0.0
+
+
+@dataclass(slots=True, frozen=True)
 class AssistantTurnResult:
     """Represents one completed assistant turn."""
 
@@ -43,6 +56,7 @@ class AssistantTurnResult:
     finished_at: datetime
     action_plan: "DesktopActionPlan | None" = None
     action_results: tuple["ActionExecutionResult", ...] = ()
+    recalled_memories: tuple[MemoryRecord, ...] = ()
 
 
 @dataclass(slots=True, frozen=True)

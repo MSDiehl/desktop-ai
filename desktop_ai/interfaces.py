@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
+from datetime import datetime
 from pathlib import Path
 from typing import Protocol
 
-from desktop_ai.types import AssistantPresenceState, CapturedScreen, VoiceActivation
+from desktop_ai.types import AssistantPresenceState, CapturedScreen, MemoryRecord, VoiceActivation
 
 
 class ContextCollector(Protocol):
@@ -66,3 +67,24 @@ class PresenceOverlay(Protocol):
 
     def set_state(self, state: AssistantPresenceState) -> None:
         """Update visible assistant presence state."""
+
+
+class MemoryStore(Protocol):
+    """Persists assistant memories and retrieves relevant entries."""
+
+    def recall(self, *, query: str, limit: int) -> tuple[MemoryRecord, ...]:
+        """Return memories most relevant to the query."""
+
+    def remember(
+        self,
+        *,
+        created_at: datetime,
+        user_note: str | None,
+        assistant_reply: str,
+        context: Mapping[str, str],
+        action_summary: str,
+    ) -> None:
+        """Persist one completed assistant turn."""
+
+    def close(self) -> None:
+        """Release memory-store resources."""

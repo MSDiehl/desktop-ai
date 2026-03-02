@@ -89,6 +89,7 @@ class VoiceTriggerConfig:
     wake_word: str
     listen_seconds: float
     followup_listen_seconds: float
+    start_silence_seconds: float
     end_silence_seconds: float
     activity_threshold: float
     sample_rate: int
@@ -104,6 +105,10 @@ class VoiceTriggerConfig:
             followup_listen_seconds=_get_env_float(
                 "ASSISTANT_VOICE_FOLLOWUP_LISTEN_SECONDS",
                 12.0,
+            ),
+            start_silence_seconds=_get_env_float(
+                "ASSISTANT_VOICE_START_SILENCE_SECONDS",
+                3.0,
             ),
             end_silence_seconds=_get_env_float("ASSISTANT_VOICE_END_SILENCE_SECONDS", 1.0),
             activity_threshold=_get_env_float("ASSISTANT_VOICE_ACTIVITY_THRESHOLD", 450.0),
@@ -199,6 +204,37 @@ class DesktopControlConfig:
 
 
 @dataclass(slots=True, frozen=True)
+class MemoryConfig:
+    """Persistent memory settings."""
+
+    enabled: bool
+    database_path: Path
+    max_entries: int
+    recall_limit: int
+    prompt_entry_chars: int
+    context_chars: int
+    search_lookback: int
+
+    @classmethod
+    def from_env(cls, *, artifacts_dir: Path) -> "MemoryConfig":
+        """Load memory settings from environment variables."""
+        db_setting: str = _get_env("ASSISTANT_MEMORY_DB", "memory.sqlite3") or "memory.sqlite3"
+        configured_path: Path = Path(db_setting)
+        database_path: Path = (
+            configured_path if configured_path.is_absolute() else artifacts_dir / configured_path
+        )
+        return cls(
+            enabled=_get_env_bool("ASSISTANT_ENABLE_MEMORY", True),
+            database_path=database_path,
+            max_entries=max(100, _get_env_int("ASSISTANT_MEMORY_MAX_ENTRIES", 5000)),
+            recall_limit=max(0, min(20, _get_env_int("ASSISTANT_MEMORY_RECALL_LIMIT", 6))),
+            prompt_entry_chars=max(80, min(600, _get_env_int("ASSISTANT_MEMORY_PROMPT_CHARS", 240))),
+            context_chars=max(200, min(8000, _get_env_int("ASSISTANT_MEMORY_CONTEXT_CHARS", 1200))),
+            search_lookback=max(50, min(10000, _get_env_int("ASSISTANT_MEMORY_SEARCH_LOOKBACK", 1500))),
+        )
+
+
+@dataclass(slots=True, frozen=True)
 class AssistantConfig:
     """Runtime settings for assistant orchestration."""
 
@@ -211,6 +247,7 @@ class AssistantConfig:
     voice_trigger: VoiceTriggerConfig
     avatar: AvatarConfig
     desktop_control: DesktopControlConfig
+    memory: MemoryConfig
     system_prompt: str
     log_level: str
 
@@ -232,6 +269,7 @@ class AssistantConfig:
             voice_trigger=VoiceTriggerConfig.from_env(),
             avatar=AvatarConfig.from_env(),
             desktop_control=DesktopControlConfig.from_env(artifacts_dir=artifacts_dir),
+            memory=MemoryConfig.from_env(artifacts_dir=artifacts_dir),
             system_prompt=_get_env("ASSISTANT_SYSTEM_PROMPT", DEFAULT_SYSTEM_PROMPT)
             or DEFAULT_SYSTEM_PROMPT,
             log_level=_get_env("ASSISTANT_LOG_LEVEL", "INFO") or "INFO",

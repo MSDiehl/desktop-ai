@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -13,6 +13,7 @@ from desktop_ai.desktop_control import DesktopController, format_action
 from desktop_ai.interfaces import (
     AudioOutput,
     ContextCollector,
+    MemoryStore,
     PresenceOverlay,
     ScreenCapturer,
     SpeechSynthesizer,
@@ -25,6 +26,7 @@ from desktop_ai.types import (
     AssistantPresenceState,
     AssistantTurnResult,
     DesktopActionPlan,
+    MemoryRecord,
 )
 
 
@@ -40,6 +42,9 @@ class DesktopAssistant:
     voice_trigger_listener: VoiceTriggerListener | None = None
     presence_overlay: PresenceOverlay | None = None
     desktop_controller: DesktopController | None = None
+    memory_store: MemoryStore | None = None
+    memory_recall_limit: int = 6
+    memory_prompt_chars: int = 240
     action_approval_callback: Callable[[DesktopActionPlan], bool] | None = None
     enable_speech: bool = True
     logger: logging.Logger = logging.getLogger(__name__)
@@ -51,6 +56,10 @@ class DesktopAssistant:
         started_at: datetime = datetime.now(timezone.utc)
         try:
             context: dict[str, str] = self.context_collector.collect()
+            recalled_memories: tuple[MemoryRecord, ...] = self._recall_memories(
+                user_note=user_note,
+                context=context,
+            )
             desktop_control_enabled: bool = self.desktop_controller is not None
             max_actions_per_turn: int = (
                 self.desktop_controller.max_actions_per_turn if self.desktop_controller is not None else 5
@@ -63,9 +72,11 @@ class DesktopAssistant:
             prompt: str = build_user_prompt(
                 context,
                 user_note=user_note,
+                memories=recalled_memories,
                 desktop_control_enabled=desktop_control_enabled,
                 max_actions_per_turn=max_actions_per_turn,
                 allowed_launch_commands=allowed_launch_commands,
+                memory_entry_chars=self.memory_prompt_chars,
             )
             raw_response_text: str = self.text_generator.generate(
                 prompt=prompt,
@@ -87,6 +98,15 @@ class DesktopAssistant:
                         summary: str = ", ".join(format_action(result.action) for result in action_results)
                         self.logger.info("Desktop actions attempted: %s", summary)
 
+            self._remember_turn(
+                created_at=started_at,
+                user_note=user_note,
+                response_text=response_text,
+                context=context,
+                action_plan=action_plan,
+                action_results=action_results,
+            )
+
             audio_path: Path | None = None
             if (
                 self.enable_speech
@@ -107,6 +127,7 @@ class DesktopAssistant:
                 finished_at=finished_at,
                 action_plan=action_plan,
                 action_results=action_results,
+                recalled_memories=recalled_memories,
             )
         finally:
             self._set_presence_state("idle")
@@ -158,6 +179,11 @@ class DesktopAssistant:
     def close(self) -> None:
         """Close assistant-owned resources."""
         self.request_stop()
+        if self.memory_store is not None:
+            try:
+                self.memory_store.close()
+            except Exception as error:
+                self.logger.warning("Failed to close memory store: %s", error)
         if self.presence_overlay is None:
             return
         try:
@@ -177,6 +203,86 @@ class DesktopAssistant:
             self.presence_overlay.set_state(state)
         except Exception as error:
             self.logger.warning("Failed to update presence state %s: %s", state, error)
+
+    def _recall_memories(
+        self,
+        *,
+        user_note: str | None,
+        context: Mapping[str, str],
+    ) -> tuple[MemoryRecord, ...]:
+        """Recall relevant memories for the current turn."""
+        if self.memory_store is None or self.memory_recall_limit <= 0:
+            return ()
+        query: str = self._build_memory_query(user_note=user_note, context=context)
+        try:
+            return self.memory_store.recall(query=query, limit=self.memory_recall_limit)
+        except Exception as error:
+            self.logger.warning("Failed to recall memories: %s", error)
+            return ()
+
+    def _build_memory_query(self, *, user_note: str | None, context: Mapping[str, str]) -> str:
+        """Build a memory-recall query from user note and key context hints."""
+        if user_note and user_note.strip():
+            return user_note.strip()
+
+        query_parts: list[str] = []
+        for key in ("active_window.title", "active_window.process_name", "environment.cwd"):
+            value: str | None = context.get(key)
+            if value:
+                query_parts.append(value)
+        return " ".join(query_parts).strip()
+
+    def _remember_turn(
+        self,
+        *,
+        created_at: datetime,
+        user_note: str | None,
+        response_text: str,
+        context: Mapping[str, str],
+        action_plan: DesktopActionPlan | None,
+        action_results: tuple[ActionExecutionResult, ...],
+    ) -> None:
+        """Persist a completed turn to memory."""
+        if self.memory_store is None:
+            return
+        action_summary: str = self._build_action_summary(
+            action_plan=action_plan,
+            action_results=action_results,
+        )
+        try:
+            self.memory_store.remember(
+                created_at=created_at,
+                user_note=user_note,
+                assistant_reply=response_text,
+                context=context,
+                action_summary=action_summary,
+            )
+        except Exception as error:
+            self.logger.warning("Failed to persist turn memory: %s", error)
+
+    def _build_action_summary(
+        self,
+        *,
+        action_plan: DesktopActionPlan | None,
+        action_results: tuple[ActionExecutionResult, ...],
+    ) -> str:
+        """Render action outcomes into one short memory string."""
+        if action_results:
+            rendered_results: list[str] = []
+            for result in action_results:
+                status: str = "ok" if result.success else "failed"
+                rendered_results.append(
+                    f"{status}: {format_action(result.action)} ({result.detail})"
+                )
+            return "; ".join(rendered_results)
+
+        if action_plan is None or not action_plan.actions:
+            return ""
+
+        planned: str = ", ".join(format_action(action) for action in action_plan.actions)
+        if self.desktop_controller is not None and self.desktop_controller.require_approval:
+            return f"Requested actions were denied or skipped: {planned}"
+        return f"Planned actions: {planned}"
 
     def _on_wake_word_detected(self) -> None:
         """Handle wake-word detection as early as possible."""

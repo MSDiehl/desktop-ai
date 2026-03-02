@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
+from datetime import timezone
+
+from desktop_ai.types import MemoryRecord
 
 
 def build_context_block(context: Mapping[str, str]) -> str:
@@ -13,17 +16,54 @@ def build_context_block(context: Mapping[str, str]) -> str:
     return "\n".join(lines)
 
 
+def _truncate_text(value: str, *, max_chars: int) -> str:
+    """Trim whitespace and enforce a hard character limit."""
+    collapsed: str = " ".join(value.split()).strip()
+    if len(collapsed) <= max_chars:
+        return collapsed
+    if max_chars <= 3:
+        return collapsed[:max_chars]
+    return collapsed[: max_chars - 3].rstrip() + "..."
+
+
+def build_memory_block(
+    memories: Sequence[MemoryRecord],
+    *,
+    max_entry_chars: int,
+) -> str:
+    """Render recalled memories in a concise bullet list."""
+    if not memories:
+        return "No relevant prior memories were recalled."
+
+    lines: list[str] = []
+    for memory in memories:
+        timestamp_text: str = memory.created_at.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%SZ")
+        note_text: str = _truncate_text(memory.user_note or "(no user note)", max_chars=max_entry_chars)
+        reply_text: str = _truncate_text(memory.assistant_reply, max_chars=max_entry_chars)
+        if memory.action_summary:
+            action_text: str = _truncate_text(memory.action_summary, max_chars=max_entry_chars)
+            lines.append(
+                f"- [{timestamp_text}] user={note_text} | assistant={reply_text} | actions={action_text}"
+            )
+            continue
+        lines.append(f"- [{timestamp_text}] user={note_text} | assistant={reply_text}")
+    return "\n".join(lines)
+
+
 def build_user_prompt(
     context: Mapping[str, str],
     user_note: str | None = None,
+    memories: Sequence[MemoryRecord] = (),
     *,
     desktop_control_enabled: bool = False,
     max_actions_per_turn: int = 5,
     allowed_launch_commands: tuple[str, ...] = (),
+    memory_entry_chars: int = 240,
 ) -> str:
     """Build the user message that accompanies the screenshot."""
     note: str = user_note.strip() if user_note else ""
     context_block: str = build_context_block(context)
+    memory_block: str = build_memory_block(memories, max_entry_chars=max(80, memory_entry_chars))
     if desktop_control_enabled:
         launch_scope: str = (
             ", ".join(allowed_launch_commands)
@@ -67,6 +107,7 @@ def build_user_prompt(
             '- `launch`: {"type":"launch","command":str}\n'
             '- `wait`: {"type":"wait","seconds":float}\n\n'
             f"{note_block}\n"
+            f"Relevant prior memories:\n{memory_block}\n\n"
             f"Structured context:\n{context_block}\n"
         )
     if note:
@@ -82,6 +123,7 @@ def build_user_prompt(
             "- For recommendation questions, give one top pick plus 2 to 4 options.\n"
             "- Keep replies short (1 to 4 sentences) unless asked for more.\n\n"
             f"User note:\n{note}\n\n"
+            f"Relevant prior memories:\n{memory_block}\n\n"
             f"Structured context:\n{context_block}\n\n"
             "Return only the spoken reply."
         )
@@ -95,6 +137,7 @@ def build_user_prompt(
         "- Optionally suggest one useful next step.\n"
         "- Avoid judgmental productivity advice.\n"
         "- Keep it to 1 to 2 sentences.\n\n"
+        f"Relevant prior memories:\n{memory_block}\n\n"
         f"Structured context:\n{context_block}\n\n"
         "Return only the spoken reply."
     )
